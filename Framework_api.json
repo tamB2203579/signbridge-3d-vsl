@@ -1,0 +1,984 @@
+{
+  "52": {
+    "inputs": {
+      "video": "kính trọng.mp4",
+      "force_rate": [
+        "257",
+        0
+      ],
+      "custom_width": [
+        "264",
+        0
+      ],
+      "custom_height": [
+        "265",
+        0
+      ],
+      "frame_load_cap": [
+        "365",
+        0
+      ],
+      "skip_first_frames": [
+        "364",
+        0
+      ],
+      "select_every_nth": 1,
+      "format": "Wan"
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Load Video (Upload) 🎥🅥🅗🅢"
+    }
+  },
+  "167": {
+    "inputs": {
+      "image": "avatar_nu.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "226": {
+    "inputs": {
+      "frame_rate": [
+        "319",
+        5
+      ],
+      "loop_count": 0,
+      "filename_prefix": "WanAnimate",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 16,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "359",
+        3
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "254": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "255": {
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "257": {
+    "inputs": {
+      "value": 30
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "264": {
+    "inputs": {
+      "value": 720
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "265": {
+    "inputs": {
+      "value": 1280
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "276": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "296": {
+    "inputs": {
+      "value": false
+    },
+    "class_type": "easy boolean",
+    "_meta": {
+      "title": "Boolean"
+    }
+  },
+  "303": {
+    "inputs": {
+      "fps": [
+        "319",
+        5
+      ],
+      "filename_prefix": "video/ComfyUI",
+      "only_preview": true,
+      "video-preview": "",
+      "images": [
+        "359",
+        3
+      ]
+    },
+    "class_type": "SaveVideoRGBA",
+    "_meta": {
+      "title": "Save Video (RGBA)"
+    }
+  },
+  "316": {
+    "inputs": {
+      "width": [
+        "351",
+        1
+      ],
+      "height": [
+        "351",
+        2
+      ],
+      "face_padding": 0,
+      "model": [
+        "354",
+        0
+      ],
+      "images": [
+        "351",
+        0
+      ]
+    },
+    "class_type": "PoseAndFaceDetection",
+    "_meta": {
+      "title": "Pose and Face Detection"
+    }
+  },
+  "317": {
+    "inputs": {
+      "value": 77
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "318": {
+    "inputs": {
+      "value": "(a>0)*1",
+      "a": [
+        "358",
+        3
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "🔧 Simple Math"
+    }
+  },
+  "319": {
+    "inputs": {
+      "video_info": [
+        "52",
+        3
+      ]
+    },
+    "class_type": "VHS_VideoInfo",
+    "_meta": {
+      "title": "Video Info 🎥🅥🅗🅢"
+    }
+  },
+  "320": {
+    "inputs": {
+      "image": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "Get Image Size"
+    }
+  },
+  "321": {
+    "inputs": {
+      "backend": "inductor",
+      "fullgraph": false,
+      "mode": "default",
+      "dynamic": false,
+      "compile_transformer_blocks_only": true,
+      "dynamo_cache_size_limit": 64,
+      "force_parameter_static_shapes": true,
+      "model": [
+        "323",
+        0
+      ]
+    },
+    "class_type": "TorchCompileModelWanVideoV2",
+    "_meta": {
+      "title": "TorchCompileModelWanVideoV2"
+    }
+  },
+  "322": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "330",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "323": {
+    "inputs": {
+      "enable_fp16_accumulation": true,
+      "model": [
+        "322",
+        0
+      ]
+    },
+    "class_type": "ModelPatchTorchSettings",
+    "_meta": {
+      "title": "Model Patch Torch Settings"
+    }
+  },
+  "324": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "325": {
+    "inputs": {
+      "boolean": [
+        "332",
+        0
+      ],
+      "on_true": [
+        "326",
+        0
+      ],
+      "on_false": [
+        "331",
+        0
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "326": {
+    "inputs": {
+      "model": [
+        "331",
+        0
+      ]
+    },
+    "class_type": "wanBlockSwap",
+    "_meta": {
+      "title": "wanBlockSwap"
+    }
+  },
+  "327": {
+    "inputs": {
+      "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+      "strength_model": 0.3,
+      "model": [
+        "355",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "329": {
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "330": {
+    "inputs": {
+      "shift": 8,
+      "model": [
+        "363",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "331": {
+    "inputs": {
+      "boolean": [
+        "296",
+        0
+      ],
+      "on_true": [
+        "321",
+        0
+      ],
+      "on_false": [
+        "323",
+        0
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "332": {
+    "inputs": {
+      "comparison": "a > b",
+      "a": [
+        "276",
+        0
+      ],
+      "b": [
+        "324",
+        0
+      ]
+    },
+    "class_type": "easy compare",
+    "_meta": {
+      "title": "Compare"
+    }
+  },
+  "333": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "334": {
+    "inputs": {
+      "output_type": "string",
+      "*": [
+        "349",
+        0
+      ]
+    },
+    "class_type": "easy convertAnything",
+    "_meta": {
+      "title": "Convert Any"
+    }
+  },
+  "335": {
+    "inputs": {
+      "text": "vivid colors, overexposed, static, blurry details, subtitles, style, artwork, painting, picture, still, overall gray, worst quality, low quality, JPEG artifacts, ugly, deformed, extra fingers, missing fingers, malformed hands, blurry hands, motion blur on fingers, mutated hands, poorly drawn hands, poorly drawn face, distorted, disfigured, malformed limbs, fused fingers, low resolution, over-smoothed skin, still image, cluttered background, three legs, many people in background, walking backwards",
+      "clip": [
+        "333",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "336": {
+    "inputs": {
+      "text": "masterpiece, high quality, 8k, sharp focus, anatomically correct hands and fingers, distinct fingers, natural skin texture, clear hand gestures, realistic Vietnamese sign language presenter, professional studio lighting, crisp edges",
+      "clip": [
+        "333",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "337": {
+    "inputs": {
+      "positive": "(a<=b) * a + (a>b) * ((a-c>b+4*d) * (b+(c>0)*4) + (a-c<=b+4*d) * (a-c+{max_frames}))\n"
+    },
+    "class_type": "easy positive",
+    "_meta": {
+      "title": "Positive"
+    }
+  },
+  "338": {
+    "inputs": {
+      "crop": "none",
+      "clip_vision": [
+        "348",
+        0
+      ],
+      "image": [
+        "350",
+        0
+      ]
+    },
+    "class_type": "CLIPVisionEncode",
+    "_meta": {
+      "title": "CLIP Vision Encode"
+    }
+  },
+  "339": {
+    "inputs": {
+      "value": "(a>0)*b",
+      "a": [
+        "358",
+        3
+      ],
+      "b": [
+        "349",
+        0
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "🔧 Simple Math"
+    }
+  },
+  "340": {
+    "inputs": {
+      "comparison": "a < b",
+      "a": [
+        "341",
+        0
+      ],
+      "b": [
+        "52",
+        1
+      ]
+    },
+    "class_type": "easy compare",
+    "_meta": {
+      "title": "Compare"
+    }
+  },
+  "341": {
+    "inputs": {
+      "any": [
+        "342",
+        0
+      ]
+    },
+    "class_type": "easy lengthAnything",
+    "_meta": {
+      "title": "Length Any"
+    }
+  },
+  "342": {
+    "inputs": {
+      "any_1": [
+        "358",
+        4
+      ],
+      "any_2": [
+        "347",
+        0
+      ]
+    },
+    "class_type": "easy batchAnything",
+    "_meta": {
+      "title": "Batch Any"
+    }
+  },
+  "343": {
+    "inputs": {
+      "value": "a+1",
+      "a": [
+        "358",
+        3
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "🔧 Simple Math"
+    }
+  },
+  "344": {
+    "inputs": {
+      "find1": "{max_frames}",
+      "replace1": [
+        "334",
+        0
+      ],
+      "find2": "",
+      "replace2": "",
+      "find3": "",
+      "replace3": "",
+      "prompt": [
+        "337",
+        0
+      ]
+    },
+    "class_type": "easy promptReplace",
+    "_meta": {
+      "title": "PromptReplace"
+    }
+  },
+  "345": {
+    "inputs": {
+      "samples": [
+        "346",
+        0
+      ],
+      "vae": [
+        "329",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "346": {
+    "inputs": {
+      "trim_amount": [
+        "361",
+        3
+      ],
+      "samples": [
+        "353",
+        0
+      ]
+    },
+    "class_type": "TrimVideoLatent",
+    "_meta": {
+      "title": "Trim Video Latent"
+    }
+  },
+  "347": {
+    "inputs": {
+      "start_index": [
+        "339",
+        0
+      ],
+      "num_frames": 4096,
+      "images": [
+        "345",
+        0
+      ]
+    },
+    "class_type": "GetImageRangeFromBatch",
+    "_meta": {
+      "title": "Get Image or Mask Range From Batch"
+    }
+  },
+  "348": {
+    "inputs": {
+      "clip_name": "clip_vision_h.safetensors"
+    },
+    "class_type": "CLIPVisionLoader",
+    "_meta": {
+      "title": "Load CLIP Vision"
+    }
+  },
+  "349": {
+    "inputs": {
+      "value": 7
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "350": {
+    "inputs": {
+      "width": [
+        "320",
+        0
+      ],
+      "height": [
+        "320",
+        1
+      ],
+      "upscale_method": "lanczos",
+      "keep_proportion": "crop",
+      "pad_color": "0, 0, 0",
+      "crop_position": "top",
+      "divisible_by": 16,
+      "device": "cpu",
+      "image": [
+        "167",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "351": {
+    "inputs": {
+      "width": [
+        "320",
+        0
+      ],
+      "height": [
+        "320",
+        1
+      ],
+      "upscale_method": "lanczos",
+      "keep_proportion": "crop",
+      "pad_color": "0, 0, 0",
+      "crop_position": "top",
+      "divisible_by": 16,
+      "device": "cpu",
+      "image": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "352": {
+    "inputs": {
+      "width": [
+        "350",
+        1
+      ],
+      "height": [
+        "350",
+        2
+      ],
+      "retarget_padding": 10,
+      "body_stick_width": 3,
+      "hand_stick_width": 3,
+      "draw_head": "True",
+      "pose_data": [
+        "316",
+        0
+      ]
+    },
+    "class_type": "DrawViTPose",
+    "_meta": {
+      "title": "Draw ViT Pose"
+    }
+  },
+  "353": {
+    "inputs": {
+      "seed": 640409379374739,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "sa_solver",
+      "scheduler": "linear_quadratic",
+      "denoise": 1,
+      "model": [
+        "325",
+        0
+      ],
+      "positive": [
+        "361",
+        0
+      ],
+      "negative": [
+        "361",
+        1
+      ],
+      "latent_image": [
+        "361",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "354": {
+    "inputs": {
+      "vitpose_model": "vitpose-l-wholebody.onnx",
+      "yolo_model": "yolov10m.onnx",
+      "onnx_device": "CUDAExecutionProvider"
+    },
+    "class_type": "OnnxDetectionModelLoader",
+    "_meta": {
+      "title": "ONNX Detection Model Loader"
+    }
+  },
+  "355": {
+    "inputs": {
+      "lora_name": "lightx2v_I2V_14B_480p_cfg_step_distill_rank256_bf16.safetensors",
+      "strength_model": 0.9500000000000002,
+      "model": [
+        "356",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "356": {
+    "inputs": {
+      "unet_name": "Wan2_2-Animate-14B_fp8_scaled_e4m3fn_KJ_v2.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "357": {
+    "inputs": {
+      "value_1": [
+        "344",
+        0
+      ],
+      "value_2": "1+1>2",
+      "a": [
+        "52",
+        1
+      ],
+      "b": [
+        "317",
+        0
+      ],
+      "c": [
+        "358",
+        2
+      ],
+      "d": [
+        "318",
+        0
+      ]
+    },
+    "class_type": "SimpleMathDual+",
+    "_meta": {
+      "title": "🔧 Simple Math Dual"
+    }
+  },
+  "358": {
+    "inputs": {
+      "condition": true,
+      "initial_value0": [
+        "360",
+        0
+      ],
+      "initial_value1": [
+        "360",
+        0
+      ],
+      "initial_value2": [
+        "360",
+        0
+      ]
+    },
+    "class_type": "easy whileLoopStart",
+    "_meta": {
+      "title": "While Loop Start"
+    }
+  },
+  "359": {
+    "inputs": {
+      "condition": [
+        "340",
+        0
+      ],
+      "flow": [
+        "358",
+        0
+      ],
+      "initial_value0": [
+        "362",
+        0
+      ],
+      "initial_value1": [
+        "341",
+        0
+      ],
+      "initial_value2": [
+        "343",
+        0
+      ],
+      "initial_value3": [
+        "342",
+        0
+      ]
+    },
+    "class_type": "easy whileLoopEnd",
+    "_meta": {
+      "title": "While Loop End"
+    }
+  },
+  "360": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "361": {
+    "inputs": {
+      "width": [
+        "351",
+        1
+      ],
+      "height": [
+        "351",
+        2
+      ],
+      "length": [
+        "357",
+        0
+      ],
+      "batch_size": 1,
+      "continue_motion_max_frames": [
+        "370",
+        0
+      ],
+      "video_frame_offset": [
+        "358",
+        1
+      ],
+      "positive": [
+        "336",
+        0
+      ],
+      "negative": [
+        "335",
+        0
+      ],
+      "vae": [
+        "329",
+        0
+      ],
+      "clip_vision_output": [
+        "338",
+        0
+      ],
+      "reference_image": [
+        "350",
+        0
+      ],
+      "face_video": [
+        "316",
+        1
+      ],
+      "pose_video": [
+        "352",
+        0
+      ],
+      "continue_motion": [
+        "358",
+        4
+      ]
+    },
+    "class_type": "WanAnimateToVideo",
+    "_meta": {
+      "title": "WanAnimateToVideo"
+    }
+  },
+  "362": {
+    "inputs": {
+      "value": "0+b",
+      "a": [
+        "358",
+        1
+      ],
+      "b": [
+        "361",
+        5
+      ]
+    },
+    "class_type": "SimpleMath+",
+    "_meta": {
+      "title": "🔧 Simple Math"
+    }
+  },
+  "363": {
+    "inputs": {
+      "any_02": [
+        "327",
+        0
+      ]
+    },
+    "class_type": "Any Switch (rgthree)",
+    "_meta": {
+      "title": "Any Switch (rgthree)"
+    }
+  },
+  "364": {
+    "inputs": {
+      "expression": "ceil(a*b/4)*4+1",
+      "a": [
+        "254",
+        0
+      ],
+      "b": [
+        "257",
+        0
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  },
+  "365": {
+    "inputs": {
+      "expression": "ceil(a*b/4)*4+1",
+      "a": [
+        "255",
+        0
+      ],
+      "b": [
+        "257",
+        0
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  },
+  "370": {
+    "inputs": {
+      "value": 4095
+    },
+    "class_type": "easy int",
+    "_meta": {
+      "title": "Int"
+    }
+  }
+}
