@@ -2628,8 +2628,8 @@
       "widgets_values": {
         "video": "kính trọng.mp4",
         "force_rate": 30,
-        "custom_width": 720,
-        "custom_height": 1280,
+        "custom_width": 0,
+        "custom_height": 0,
         "frame_load_cap": 0,
         "skip_first_frames": 0,
         "select_every_nth": 1,
@@ -2639,10 +2639,10 @@
           "paused": false,
           "hidden": false,
           "params": {
-            "custom_height": 1280,
+            "custom_height": 832,
             "filename": "kính trọng.mp4",
             "force_rate": 30,
-            "custom_width": 720,
+            "custom_width": 480,
             "select_every_nth": 1,
             "frame_load_cap": 0,
             "format": "video/mp4",
@@ -2655,8 +2655,8 @@
       "widgets_values_named": {
         "video": "kính trọng.mp4",
         "force_rate": 30,
-        "custom_width": 720,
-        "custom_height": 1280,
+        "custom_width": 0,
+        "custom_height": 0,
         "frame_load_cap": 0,
         "skip_first_frames": 0,
         "select_every_nth": 1,
@@ -2666,10 +2666,10 @@
           "paused": false,
           "hidden": false,
           "params": {
-            "custom_height": 1280,
+            "custom_height": 832,
             "filename": "kính trọng.mp4",
             "force_rate": 30,
-            "custom_width": 720,
+            "custom_width": 480,
             "select_every_nth": 1,
             "frame_load_cap": 0,
             "format": "video/mp4",
@@ -3345,9 +3345,9 @@
         "Node name for S&R": "easy int",
         "widget_ue_connectable": {}
       },
-      "widgets_values": [720],
+      "widgets_values": [480],
       "widgets_values_named": {
-        "value": 720
+        "value": 480
       }
     },
     {
@@ -3384,9 +3384,9 @@
         "Node name for S&R": "easy int",
         "widget_ue_connectable": {}
       },
-      "widgets_values": [1280],
+      "widgets_values": [832],
       "widgets_values_named": {
-        "value": 1280
+        "value": 832
       }
     },
     {
@@ -3693,10 +3693,10 @@
           "height": true
         }
       },
-      "widgets_values": [720, 1280, 0],
+      "widgets_values": [832, 480, 0],
       "widgets_values_named": {
-        "width": 720,
-        "height": 1280,
+        "width": 832,
+        "height": 480,
         "face_padding": 0
       }
     },
@@ -3795,13 +3795,13 @@
           "height": true
         }
       },
-      "widgets_values": [720, 1280, 10, 3, 3, "True"],
+      "widgets_values": [832, 480, 10, -1, -1, "True"],
       "widgets_values_named": {
-        "width": 720,
-        "height": 1280,
+        "width": 832,
+        "height": 480,
         "retarget_padding": 10,
-        "body_stick_width": 3,
-        "hand_stick_width": 3,
+        "body_stick_width": -1,
+        "hand_stick_width": -1,
         "draw_head": "True"
       }
     },
@@ -3951,23 +3951,23 @@
         }
       },
       "widgets_values": [
-        720,
-        1280,
-        "lanczos",
-        "crop",
+        480,
+        480,
+        "nearest-exact",
+        "stretch",
         "0, 0, 0",
-        "top",
-        16,
+        "center",
+        2,
         "cpu"
       ],
       "widgets_values_named": {
-        "width": 720,
-        "height": 1280,
-        "upscale_method": "lanczos",
-        "keep_proportion": "crop",
+        "width": 480,
+        "height": 480,
+        "upscale_method": "nearest-exact",
+        "keep_proportion": "stretch",
         "pad_color": "0, 0, 0",
-        "crop_position": "top",
-        "divisible_by": 16,
+        "crop_position": "center",
+        "divisible_by": 2,
         "device": "cpu"
       }
     },
@@ -4240,8 +4240,8 @@
         "lanczos",
         "crop",
         "0, 0, 0",
-        "top",
-        16,
+        "center",
+        8,
         "cpu"
       ],
       "widgets_values_named": {
@@ -4250,8 +4250,8 @@
         "upscale_method": "lanczos",
         "keep_proportion": "crop",
         "pad_color": "0, 0, 0",
-        "crop_position": "top",
-        "divisible_by": 16,
+        "crop_position": "center",
+        "divisible_by": 8,
         "device": "cpu"
       }
     },
@@ -4458,10 +4458,10 @@
           "height": true
         }
       },
-      "widgets_values": [720, 1280, 77, 1, 7, 0],
+      "widgets_values": [832, 480, 77, 1, 7, 0],
       "widgets_values_named": {
-        "width": 720,
-        "height": 1280,
+        "width": 832,
+        "height": 480,
         "length": 77,
         "batch_size": 1,
         "continue_motion_max_frames": 7,
