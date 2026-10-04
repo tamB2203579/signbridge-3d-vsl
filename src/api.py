@@ -470,6 +470,7 @@ class JobManager:
             parts = ["Overall", "Hands", "Hands_Shape", "Pose", "Face"]
             for part in parts:
                 mpjpe_vals = []
+                n_mpjpe_vals = []
                 pck_05_vals = []
                 pck_10_vals = []
 
@@ -478,6 +479,8 @@ class JobManager:
                     if isinstance(part_metrics, dict):
                         if "PA-MPJPE" in part_metrics:
                             mpjpe_vals.append(part_metrics["PA-MPJPE"])
+                        if "N-PA-MPJPE" in part_metrics:
+                            n_mpjpe_vals.append(part_metrics["N-PA-MPJPE"])
                         if "PA-PCK@0.05" in part_metrics:
                             pck_05_vals.append(part_metrics["PA-PCK@0.05"])
                         if "PA-PCK@0.10" in part_metrics:
@@ -485,6 +488,8 @@ class JobManager:
 
                 if mpjpe_vals:
                     summary[f"mean_{part.lower()}_PA_MPJPE"] = round(sum(mpjpe_vals) / len(mpjpe_vals), 3)
+                if n_mpjpe_vals:
+                    summary[f"mean_{part.lower()}_N_PA_MPJPE"] = round(sum(n_mpjpe_vals) / len(n_mpjpe_vals), 2)
                 if pck_05_vals:
                     summary[f"mean_{part.lower()}_PA_PCK@0.05"] = round(sum(pck_05_vals) / len(pck_05_vals), 2)
                 if pck_10_vals:
