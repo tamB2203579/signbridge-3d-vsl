@@ -445,14 +445,15 @@ def align_procrustes(Y, X):
     return apply_procrustes(X, s, R, t_vec)
 
 
-def is_hand_in_frame(hand_joints, hand_confs=None, conf_thresh=0.35, max_y=None, min_valid=4):
+def is_hand_in_frame(hand_joints, hand_confs=None, conf_thresh=0.35, max_y=None, img_size=None, margin=6.0, min_valid=4):
     """
     Determines whether a hand (21 keypoints) is legitimately visible in the video frame
     or represents resting/out-of-frame noise.
 
     1. Confidence check: Requires at least `min_valid` keypoints with confidence >= conf_thresh.
-    2. Boundary check: If max_y is provided, mean y of valid joints must be <= max_y (e.g. 0.95 * H).
+    2. Bottom boundary check: If max_y is provided, mean y of valid joints must be <= max_y (e.g. 0.95 * H).
        When hands drop to the lap or below the camera frame, ViTPose coordinates cluster at the bottom border.
+    3. 4-sided boundary check: If img_size is provided, checks if hand is clipped at screen borders.
     """
     if hand_joints is None or len(hand_joints) == 0:
         return False
@@ -465,12 +466,55 @@ def is_hand_in_frame(hand_joints, hand_confs=None, conf_thresh=0.35, max_y=None,
     else:
         valid_joints = hand_joints
 
-    if max_y is not None and len(valid_joints) > 0:
+    if len(valid_joints) == 0:
+        return False
+
+    if max_y is not None:
         mean_y = float(np.mean(valid_joints[:, 1]))
         if mean_y > max_y:
             return False
 
+    if img_size is not None and len(img_size) >= 2:
+        H, W = float(img_size[0]), float(img_size[1])
+        clip_left = np.sum(valid_joints[:, 0] <= margin) >= 2
+        clip_right = np.sum(valid_joints[:, 0] >= (W - margin)) >= 2
+        clip_bottom = np.sum(valid_joints[:, 1] >= (H - margin)) >= 2
+        clip_top = np.sum(valid_joints[:, 1] <= margin) >= 2
+        if clip_left or clip_right or clip_bottom or clip_top:
+            return False
+
     return True
+
+
+def is_hand_clipped_at_boundary(hand_joints, hand_confs=None, img_size=None, margin=6.0, conf_thresh=0.35, min_valid=4):
+    """
+    Checks if a predicted/animated hand has flown out of frame or collided with any
+    of the 4 image borders (left, right, top, bottom) due to camera framing or canvas cropping.
+    """
+    if hand_joints is None or len(hand_joints) == 0:
+        return True
+
+    if hand_confs is not None:
+        valid_mask = hand_confs >= conf_thresh
+        if np.sum(valid_mask) < min_valid:
+            return True  # Hand lost / not clearly detected in animated video
+        valid_joints = hand_joints[valid_mask]
+    else:
+        valid_joints = hand_joints
+
+    if len(valid_joints) == 0:
+        return True
+
+    if img_size is not None and len(img_size) >= 2:
+        H, W = float(img_size[0]), float(img_size[1])
+        clip_left = np.sum(valid_joints[:, 0] <= margin) >= 2
+        clip_right = np.sum(valid_joints[:, 0] >= (W - margin)) >= 2
+        clip_bottom = np.sum(valid_joints[:, 1] >= (H - margin)) >= 2
+        clip_top = np.sum(valid_joints[:, 1] <= margin) >= 2
+        if clip_left or clip_right or clip_bottom or clip_top:
+            return True
+
+    return False
 
 
 def match_hands_optimal(Y_L, Y_R, X_L, X_R, val_L, val_R, in_frame_L, in_frame_R):
@@ -549,13 +593,14 @@ def detect_resting_hands(gt_joints, confidences=None, img_size=None, conf_thresh
 
 
 def compute_wholebody_kinematics(gt_joints, pred_joints, confidences=None, bboxes=None,
-                                 alpha_1=0.05, alpha_2=0.10, conf_thresh=0.3, img_size=None):
+                                 alpha_1=0.05, alpha_2=0.10, conf_thresh=0.3,
+                                 img_size=None, gen_img_size=None, pred_confidences=None):
     """
     Computes PA-MPJPE, N-PA-MPJPE, PA-PCK@alpha_1, PA-PCK@alpha_2 across subsets (Overall, Pose, Face, Hands, Hands_Shape):
     - Overall: Combined upper-body kinematics (Pose + Face + Active in-frame Hands)
     - Pose: 17 Body keypoints
     - Face: 68 Face landmark keypoints
-    - Hands: 42 Hand keypoints with Hungarian swap-invariance, resting hand filtering, and boundary checks
+    - Hands: 42 Hand keypoints with Hungarian swap-invariance, resting hand filtering, and 4-sided boundary clipping checks
     - Hands_Shape: Local Procrustes alignment per hand isolating finger articulation/shape from wrist translation
     - N-PA-MPJPE: Normalized MPJPE (% of person scale) providing zoom-invariant evaluation
     """
@@ -639,7 +684,7 @@ def compute_wholebody_kinematics(gt_joints, pred_joints, confidences=None, bboxe
             part_c_a2["Overall"] += int(np.sum(diff <= thresh_2))
             part_total["Overall"] += len(diff)
 
-        # 4. Hands evaluation with Hungarian Swap Matching, Resting Hand Filtering & Out-of-Frame Filtering
+        # 4. Hands evaluation with Hungarian Swap Matching, Boundary Clipping & Resting Hand Filtering
         Y_L = Y_t[HAND_LEFT_INDICES]
         Y_R = Y_t[HAND_RIGHT_INDICES]
         X_L = X_aligned_t[HAND_LEFT_INDICES]
@@ -648,15 +693,35 @@ def compute_wholebody_kinematics(gt_joints, pred_joints, confidences=None, bboxe
         c_L = confidences[t, HAND_LEFT_INDICES] if confidences is not None else np.ones(len(HAND_LEFT_INDICES), dtype=np.float32)
         c_R = confidences[t, HAND_RIGHT_INDICES] if confidences is not None else np.ones(len(HAND_RIGHT_INDICES), dtype=np.float32)
 
-        in_f_L = is_hand_in_frame(Y_L, c_L, conf_thresh=conf_thresh, max_y=max_y) and (not resting_L)
-        in_f_R = is_hand_in_frame(Y_R, c_R, conf_thresh=conf_thresh, max_y=max_y) and (not resting_R)
+        raw_X_L = X_t[HAND_LEFT_INDICES]
+        raw_X_R = X_t[HAND_RIGHT_INDICES]
+        c_pr_L = pred_confidences[t, HAND_LEFT_INDICES] if pred_confidences is not None else None
+        c_pr_R = pred_confidences[t, HAND_RIGHT_INDICES] if pred_confidences is not None else None
+
+        in_f_L = is_hand_in_frame(Y_L, c_L, conf_thresh=conf_thresh, max_y=max_y, img_size=img_size) and (not resting_L)
+        in_f_R = is_hand_in_frame(Y_R, c_R, conf_thresh=conf_thresh, max_y=max_y, img_size=img_size) and (not resting_R)
 
         val_L = c_L >= conf_thresh
         val_R = c_R >= conf_thresh
 
-        m_X_L, m_X_R, _ = match_hands_optimal(Y_L, Y_R, X_L, X_R, val_L, val_R, in_f_L, in_f_R)
+        m_X_L, m_X_R, is_swp = match_hands_optimal(Y_L, Y_R, X_L, X_R, val_L, val_R, in_f_L, in_f_R)
 
-        for is_in, y_h, x_h, val_h in [(in_f_L, Y_L, m_X_L, val_L), (in_f_R, Y_R, m_X_R, val_R)]:
+        # Match animated video raw hands and confidences
+        if is_swp:
+            m_raw_X_L, m_raw_X_R = raw_X_R, raw_X_L
+            m_c_pr_L, m_c_pr_R = c_pr_R, c_pr_L
+        else:
+            m_raw_X_L, m_raw_X_R = raw_X_L, raw_X_R
+            m_c_pr_L, m_c_pr_R = c_pr_L, c_pr_R
+
+        # Filter out frames where avatar's hand flies out of animate video frame
+        is_pr_clipped_L = is_hand_clipped_at_boundary(m_raw_X_L, m_c_pr_L, img_size=gen_img_size, margin=6.0, conf_thresh=conf_thresh)
+        is_pr_clipped_R = is_hand_clipped_at_boundary(m_raw_X_R, m_c_pr_R, img_size=gen_img_size, margin=6.0, conf_thresh=conf_thresh)
+
+        valid_eval_L = in_f_L and (not is_pr_clipped_L)
+        valid_eval_R = in_f_R and (not is_pr_clipped_R)
+
+        for is_in, y_h, x_h, val_h in [(valid_eval_L, Y_L, m_X_L, val_L), (valid_eval_R, Y_R, m_X_R, val_R)]:
             if is_in and np.sum(val_h) >= 3:
                 # 4A. Global Hands Error (under whole-body alignment, swap-corrected, active signing hands)
                 diff_h = np.linalg.norm(x_h[val_h] - y_h[val_h], axis=-1)
@@ -798,10 +863,19 @@ def evaluate_pair(source_path, generated_path,
         gt_kps = gt_kps[:T]
         pr_kps = pr_kps[:T]
         gt_c = gt_c[:T] if gt_c is not None else None
+        pr_c = pr_c[:T] if pr_c is not None else None
+
+        src_img_size = (src_t.shape[1], src_t.shape[2]) if (src_t is not None and len(src_t.shape) >= 3) else None
+        gen_img_size = (gen_t.shape[1], gen_t.shape[2]) if (gen_t is not None and len(gen_t.shape) >= 3) else None
 
         result["kinematics_vitpose"] = compute_wholebody_kinematics(
-            gt_kps, pr_kps, confidences=gt_c, alpha_1=alpha_1, alpha_2=alpha_2,
-            img_size=(src_t.shape[1], src_t.shape[2]) if (src_t is not None and len(src_t.shape) >= 3) else None
+            gt_kps, pr_kps,
+            confidences=gt_c,
+            pred_confidences=pr_c,
+            alpha_1=alpha_1,
+            alpha_2=alpha_2,
+            img_size=src_img_size,
+            gen_img_size=gen_img_size,
         )
     else:
         result["kinematics_vitpose"] = "ViTPose model / pose files not loaded (Place vitpose-l-wholebody.onnx in models/ or pass --vitpose_model)"
