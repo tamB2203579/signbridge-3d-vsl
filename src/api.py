@@ -123,6 +123,7 @@ class JobManager:
         if not samples:
             raise ValueError("Dataset contains no samples to evaluate.")
 
+        eff_max_frames = int(max_frames) if (max_frames is not None and int(max_frames) > 0) else None
         job_id = f"job_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         job = {
             "job_id": job_id,
@@ -130,7 +131,7 @@ class JobManager:
             "status": "queued",
             "seed": seed,
             "avatar": avatar,
-            "max_frames": max_frames,
+            "max_frames": eff_max_frames,
             "comfyui_host": comfyui_host or DEFAULT_COMFYUI_HOST,
             "mock_comfyui": mock_comfyui,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -175,6 +176,7 @@ class JobManager:
                 "is_cached": self._dataset_mgr.is_video_cached(norm_name),
             }
 
+        eff_max_frames = int(max_frames) if (max_frames is not None and int(max_frames) > 0) else None
         job_id = f"job_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         job = {
             "job_id": job_id,
@@ -182,7 +184,7 @@ class JobManager:
             "status": "queued",
             "seed": seed,
             "avatar": avatar,
-            "max_frames": max_frames,
+            "max_frames": eff_max_frames,
             "comfyui_host": comfyui_host or DEFAULT_COMFYUI_HOST,
             "mock_comfyui": mock_comfyui,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -223,6 +225,77 @@ class JobManager:
                 reverse=True,
             )
             return jobs_list[:limit]
+
+    def re_evaluate_job(self, job_id: str) -> Dict[str, Any]:
+        """
+        Re-evaluates FVD and Kinematic metrics for all samples of an already generated job
+        without calling ComfyUI synthesis again.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                raise KeyError(f"Job {job_id} not found")
+            job["status"] = "running"
+            job["current_stage"] = "evaluating_metrics"
+            job["stage_details"] = {"status": "starting_re_evaluation"}
+            self._persist_job(job_id)
+
+        resnet_extractor, vitpose_detector = get_eval_models()
+        from scripts.evaluate_benchmark import evaluate_pair
+
+        results = job.get("results", [])
+        job_dir = self.output_dir / job_id
+
+        for idx, item in enumerate(results):
+            v_name = item.get("video", "")
+            base = os.path.splitext(v_name)[0]
+            sp = item.get("source_path")
+            gp = item.get("generated_path")
+
+            if not sp or not os.path.exists(sp):
+                try:
+                    sp = str(self._dataset_mgr.download_video(v_name))
+                    item["source_path"] = sp
+                except Exception:
+                    pass
+
+            if not gp or not os.path.exists(gp):
+                cand = job_dir / f"{base}_gen.mp4"
+                if cand.exists():
+                    gp = str(cand)
+                    item["generated_path"] = gp
+
+            if sp and gp and os.path.exists(sp) and os.path.exists(gp):
+                with self._lock:
+                    job["current_sample_index"] = idx + 1
+                    job["current_sample_video"] = v_name
+                    job["current_stage"] = "evaluating_metrics"
+                    job["stage_details"] = {"video": v_name, "status": f"computing_fvd_and_kinematics ({idx+1}/{len(results)})"}
+                    self._persist_job(job_id)
+
+                try:
+                    eval_out = evaluate_pair(
+                        source_path=sp,
+                        generated_path=gp,
+                        resnet_extractor=resnet_extractor,
+                        vitpose_detector=vitpose_detector,
+                        max_frames=None,
+                    )
+                    item["frames"] = eval_out.get("frames")
+                    item["FVD"] = eval_out.get("FVD")
+                    item["kinematics"] = eval_out.get("kinematics_vitpose")
+                except Exception as e:
+                    logger.error("Failed re-evaluating pair %s vs %s: %s", sp, gp, e)
+
+        with self._lock:
+            job["status"] = "completed"
+            job["current_stage"] = "completed"
+            job["stage_details"] = {"status": "re_evaluation_finished"}
+            job["completed_at"] = datetime.now(timezone.utc).isoformat()
+            self._persist_job(job_id)
+
+        logger.info("Successfully re-evaluated all samples for job %s without ComfyUI generation.", job_id)
+        return dict(job)
 
     def _worker_loop(self) -> None:
         """Worker loop that sequentially pulls jobs from queue and executes them."""
@@ -304,12 +377,15 @@ class JobManager:
                         job["stage_details"] = info
                         # Do not persist on every single step to avoid excessive disk I/O
 
+                job_max_frames = job.get("max_frames")
+                eff_max_frames = int(job_max_frames) if (job_max_frames is not None and int(job_max_frames) > 0) else None
+
                 try:
                     comfy_client.run_pipeline(
                         video_path=source_video_path,
                         avatar_name=job.get("avatar", "avatar_nam.png"),
                         seed=job.get("seed", 42),
-                        max_frames=job.get("max_frames"),
+                        max_frames=eff_max_frames,
                         dest_path=gen_video_dest,
                         progress_callback=progress_cb,
                     )
@@ -335,7 +411,7 @@ class JobManager:
                     generated_path=str(gen_video_dest),
                     resnet_extractor=resnet_extractor,
                     vitpose_detector=vitpose_detector,
-                    max_frames=job.get("max_frames"),
+                    max_frames=eff_max_frames,
                 )
 
                 sample_result = {
@@ -562,6 +638,26 @@ OPENAPI_SPEC = {
                 }
             }
         },
+        "/api/v1/jobs/{job_id}/re-evaluate": {
+            "post": {
+                "tags": ["Jobs"],
+                "summary": "Re-evaluate Existing Job Videos",
+                "description": "Re-calculate FVD and ViTPose Kinematic metrics on already generated videos without re-running ComfyUI synthesis.",
+                "parameters": [
+                    {
+                        "name": "job_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                        "description": "Job identifier (e.g. job_20261003_220956_382aa5)"
+                    }
+                ],
+                "responses": {
+                    "202": {"description": "Re-evaluation started in background"},
+                    "404": {"description": "Job not found"}
+                }
+            }
+        },
         "/api/v1/jobs": {
             "get": {
                 "tags": ["Jobs"],
@@ -722,10 +818,15 @@ def create_app(job_manager: Optional[JobManager] = None) -> Flask:
             return jsonify({"status": "error", "error": "n must be an integer"}), 400
 
         seed = int(data.get("seed", 42))
-        avatar = data.get("avatar", "avatar_nam.png")
-        max_frames = data.get("max_frames")
-        if max_frames is not None:
-            max_frames = int(max_frames)
+        max_frames_raw = data.get("max_frames")
+        max_frames = None
+        if max_frames_raw is not None:
+            try:
+                val = int(max_frames_raw)
+                if val > 0:
+                    max_frames = val
+            except (ValueError, TypeError):
+                max_frames = None
         comfyui_host = data.get("comfyui_host")
         mock_comfyui = bool(data.get("mock_comfyui", False))
 
@@ -760,10 +861,15 @@ def create_app(job_manager: Optional[JobManager] = None) -> Flask:
             return jsonify({"status": "error", "error": "video_name is required"}), 400
 
         seed = int(data.get("seed", 42))
-        avatar = data.get("avatar", "avatar_nu.png")
-        max_frames = data.get("max_frames")
-        if max_frames is not None:
-            max_frames = int(max_frames)
+        max_frames_raw = data.get("max_frames")
+        max_frames = None
+        if max_frames_raw is not None:
+            try:
+                val = int(max_frames_raw)
+                if val > 0:
+                    max_frames = val
+            except (ValueError, TypeError):
+                max_frames = None
         comfyui_host = data.get("comfyui_host")
         mock_comfyui = bool(data.get("mock_comfyui", False))
 
@@ -795,6 +901,21 @@ def create_app(job_manager: Optional[JobManager] = None) -> Flask:
         if not job:
             return jsonify({"status": "error", "error": f"Job {job_id} not found"}), 404
         return jsonify(job), 200
+
+    @app.route("/api/v1/jobs/<job_id>/re-evaluate", methods=["POST"])
+    def re_evaluate_job(job_id: str):
+        """Re-evaluate metrics for all generated videos of an existing job without running ComfyUI."""
+        job = mgr.get_job(job_id)
+        if not job:
+            return jsonify({"status": "error", "error": f"Job {job_id} not found"}), 404
+
+        threading.Thread(target=mgr.re_evaluate_job, args=(job_id,), daemon=True).start()
+        return jsonify({
+            "status": "success",
+            "job_id": job_id,
+            "message": f"Re-evaluation started in background for job {job_id}",
+            "poll_url": f"/api/v1/jobs/{job_id}",
+        }), 202
 
     @app.route("/api/v1/jobs", methods=["GET"])
     def list_jobs():

@@ -25,6 +25,7 @@ def load_video_frames(video_path, max_frames=None):
     if not cap.isOpened():
         raise IOError(f"Cannot open video: {video_path}")
 
+    frame_cap = int(max_frames) if (max_frames is not None and max_frames > 0) else None
     frames = []
     while True:
         ret, frame = cap.read()
@@ -32,7 +33,7 @@ def load_video_frames(video_path, max_frames=None):
             break
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frames.append(frame)
-        if max_frames is not None and len(frames) >= max_frames:
+        if frame_cap is not None and len(frames) >= frame_cap:
             break
     cap.release()
 
@@ -40,6 +41,7 @@ def load_video_frames(video_path, max_frames=None):
         raise ValueError(f"No frames could be read from {video_path}")
     np_frames = np.array(frames, dtype=np.float32) / 255.0
     return torch.from_numpy(np_frames)
+
 
 
 class ResNetVideoFeatureExtractor:
@@ -100,9 +102,15 @@ class ResNetVideoFeatureExtractor:
         mean = torch.tensor([0.43216, 0.394666, 0.37645], device=self.device).view(1, 3, 1, 1, 1)
         std = torch.tensor([0.22803, 0.22145, 0.216989], device=self.device).view(1, 3, 1, 1, 1)
 
-        clip_starts = list(range(0, T - clip_len + 1, stride))
+        eff_stride = stride
+        if T > clip_len and (T - clip_len) < stride:
+            eff_stride = max(1, (T - clip_len) // 2)
+
+        clip_starts = list(range(0, T - clip_len + 1, eff_stride))
         if not clip_starts:
             clip_starts = [0]
+        if len(clip_starts) == 1 and T >= clip_len + 1:
+            clip_starts.append(T - clip_len)
 
         all_feats = []
         for i in range(0, len(clip_starts), chunk_size):
@@ -163,7 +171,7 @@ def compute_fvd(real_videos, fake_videos, clip_len=16, stride=8, resnet_extracto
     if len(feats_real) < 2 or len(feats_fake) < 2:
         mu_real = np.mean(feats_real, axis=0)
         mu_fake = np.mean(feats_fake, axis=0)
-        return float(np.linalg.norm(mu_real - mu_fake)) * 100.0
+        return float(np.linalg.norm(mu_real - mu_fake)) * 10.0
 
     mu_real = np.mean(feats_real, axis=0)
     sigma_real = np.cov(feats_real, rowvar=False)
@@ -175,17 +183,23 @@ def compute_fvd(real_videos, fake_videos, clip_len=16, stride=8, resnet_extracto
     sigma_real += np.eye(sigma_real.shape[0]) * eps
     sigma_fake += np.eye(sigma_fake.shape[0]) * eps
 
-    res = scipy.linalg.sqrtm(sigma_real.dot(sigma_fake))
-    covmean = res[0] if isinstance(res, tuple) else res
-    if not np.isfinite(covmean).all():
-        offset = np.eye(sigma_real.shape[0]) * 1e-3
-        res = scipy.linalg.sqrtm((sigma_real + offset).dot(sigma_fake + offset))
+    # Numerically robust and symmetric calculation for tr((sigma_real * sigma_fake)^0.5)
+    try:
+        u_real, s_real, _ = np.linalg.svd(sigma_real)
+        sqrt_sigma_real = u_real @ np.diag(np.sqrt(np.maximum(s_real, 0.0))) @ u_real.T
+        m_mat = sqrt_sigma_real @ sigma_fake @ sqrt_sigma_real
+        eigvals = np.linalg.eigvalsh(m_mat)
+        tr_covmean = float(np.sum(np.sqrt(np.maximum(eigvals, 0.0))))
+    except Exception:
+        res = scipy.linalg.sqrtm(sigma_real.dot(sigma_fake))
         covmean = res[0] if isinstance(res, tuple) else res
+        if not np.isfinite(covmean).all():
+            offset = np.eye(sigma_real.shape[0]) * 1e-3
+            res = scipy.linalg.sqrtm((sigma_real + offset).dot(sigma_fake + offset))
+            covmean = res[0] if isinstance(res, tuple) else res
+        tr_covmean = float(np.trace(covmean.real))
 
-    if np.iscomplexobj(covmean):
-        covmean = covmean.real
-
-    fvd = float(diff.dot(diff) + np.trace(sigma_real) + np.trace(sigma_fake) - 2 * np.trace(covmean))
+    fvd = float(diff.dot(diff) + np.trace(sigma_real) + np.trace(sigma_fake) - 2.0 * tr_covmean)
     return max(0.0, fvd)
 
 
@@ -253,6 +267,7 @@ class ViTPoseWholeBodyDetector:
         if not self.is_available():
             return None, None
 
+        frame_cap = int(max_frames) if (max_frames is not None and max_frames > 0) else None
         cap = cv2.VideoCapture(video_path)
         joints_list = []
         confs_list = []
@@ -267,12 +282,23 @@ class ViTPoseWholeBodyDetector:
             ret, frame = cap.read()
             if not ret:
                 break
-            if max_frames and frame_idx >= max_frames:
+            if frame_cap is not None and frame_idx >= frame_cap:
                 break
 
             h, w = frame.shape[:2]
-            img_resized = cv2.resize(frame, (in_w, in_h))
-            img_input = img_resized[:, :, ::-1].transpose(2, 0, 1).astype(np.float32) / 255.0
+            # Letterbox: maintain aspect ratio without stretching
+            scale = min(float(in_w) / float(w), float(in_h) / float(h))
+            nw, nh = int(round(w * scale)), int(round(h * scale))
+            img_resized = cv2.resize(frame, (nw, nh))
+
+            pad_w = (in_w - nw) // 2
+            pad_h = (in_h - nh) // 2
+            canvas = np.zeros((in_h, in_w, 3), dtype=np.float32)
+            canvas[pad_h : pad_h + nh, pad_w : pad_w + nw, :] = (
+                img_resized[:, :, ::-1].astype(np.float32) / 255.0
+            )
+
+            img_input = canvas.transpose(2, 0, 1)
             img_input = np.expand_dims(img_input, axis=0)
 
             outputs = self.vitpose_session.run(None, {input_name: img_input})
@@ -280,16 +306,39 @@ class ViTPoseWholeBodyDetector:
 
             frame_kps = []
             frame_conf = []
-            scale_x = w / float(heatmaps.shape[2])
-            scale_y = h / float(heatmaps.shape[1])
+            hm_h, hm_w = heatmaps.shape[1], heatmaps.shape[2]
 
             for j in range(heatmaps.shape[0]):
                 hm = heatmaps[j]
                 max_idx = np.unravel_index(np.argmax(hm), hm.shape)
-                conf = float(hm[max_idx])
-                kx = float(max_idx[1]) * scale_x
-                ky = float(max_idx[0]) * scale_y
-                frame_kps.append([kx, ky])
+                py, px = int(max_idx[0]), int(max_idx[1])
+                conf = float(hm[py, px])
+
+                # Sub-pixel parabolic refinement
+                dx = 0.0
+                if 1 <= px < hm_w - 1:
+                    denom_x = 2.0 * hm[py, px] - hm[py, px - 1] - hm[py, px + 1]
+                    if abs(denom_x) > 1e-5:
+                        dx = float(np.clip(0.5 * (hm[py, px + 1] - hm[py, px - 1]) / denom_x, -0.5, 0.5))
+
+                dy = 0.0
+                if 1 <= py < hm_h - 1:
+                    denom_y = 2.0 * hm[py, px] - hm[py - 1, px] - hm[py + 1, px]
+                    if abs(denom_y) > 1e-5:
+                        dy = float(np.clip(0.5 * (hm[py + 1, px] - hm[py - 1, px]) / denom_y, -0.5, 0.5))
+
+                # Map cell center to canvas coordinates
+                canvas_x = (float(px) + dx + 0.5) * (float(in_w) / float(hm_w))
+                canvas_y = (float(py) + dy + 0.5) * (float(in_h) / float(hm_h))
+
+                # Un-pad canvas coordinates back to original frame
+                orig_x = (canvas_x - pad_w) / scale
+                orig_y = (canvas_y - pad_h) / scale
+
+                orig_x = float(np.clip(orig_x, 0.0, float(w - 1)))
+                orig_y = float(np.clip(orig_y, 0.0, float(h - 1)))
+
+                frame_kps.append([orig_x, orig_y])
                 frame_conf.append(conf)
 
             joints_list.append(frame_kps)
@@ -349,9 +398,15 @@ def parse_vitpose_file(file_path):
     return None, None
 
 
-def align_procrustes(Y, X):
+def get_procrustes_alignment(Y, X):
+    """
+    Computes optimal similarity transformation (s, R, t) that aligns X onto Y:
+    Y_hat = s * (X @ R) + t
+    Minimizing ||Y - Y_hat||_F^2
+    """
     if len(Y) < 3 or len(X) < 3:
-        return X
+        return 1.0, np.eye(2, dtype=np.float32), np.zeros((1, 2), dtype=np.float32)
+
     mu_Y = np.mean(Y, axis=0, keepdims=True)
     mu_X = np.mean(X, axis=0, keepdims=True)
     Y_c = Y - mu_Y
@@ -360,22 +415,122 @@ def align_procrustes(Y, X):
     norm_Y = np.linalg.norm(Y_c)
     norm_X = np.linalg.norm(X_c)
     if norm_X < 1e-6 or norm_Y < 1e-6:
-        return X
+        return 1.0, np.eye(2, dtype=np.float32), (mu_Y - mu_X).astype(np.float32)
 
     H = (X_c / norm_X).T @ (Y_c / norm_Y)
     U, S, Vt = np.linalg.svd(H)
     R = U @ Vt
+
+    # Enforce det(R) = +1 (proper rotation, no reflection)
     if np.linalg.det(R) < 0:
         Vt[-1, :] *= -1
         R = U @ Vt
+        s_val = (S[0] - S[1]) if len(S) >= 2 else S[0]
+    else:
+        s_val = np.sum(S)
 
-    s = np.sum(S) * (norm_Y / norm_X)
+    s = float(s_val * (norm_Y / norm_X))
     t_vec = mu_Y - s * (mu_X @ R)
+    return s, R, t_vec
+
+
+def apply_procrustes(X, s, R, t_vec):
+    """Applies similarity transformation to coordinates X."""
     return s * (X @ R) + t_vec
 
 
+def align_procrustes(Y, X):
+    """Backward-compatible wrapper returning aligned coordinates X."""
+    s, R, t_vec = get_procrustes_alignment(Y, X)
+    return apply_procrustes(X, s, R, t_vec)
+
+
+def compute_wholebody_kinematics(gt_joints, pred_joints, confidences=None, bboxes=None,
+                                 alpha_1=0.05, alpha_2=0.10, conf_thresh=0.3):
+    """
+    Computes PA-MPJPE, PA-PCK@alpha_1, PA-PCK@alpha_2 across subsets (Overall, Pose, Face, Hands)
+    using frame-level global Procrustes alignment and consistent person-level scale normalization.
+    """
+    T, J, _ = gt_joints.shape
+    subsets = {
+        "Overall": list(range(J)),
+        "Pose": [i for i in BODY_INDICES if i < J],
+        "Face": [i for i in FACE_INDICES if i < J],
+        "Hands": [i for i in HAND_ALL_INDICES if i < J]
+    }
+
+    part_errors = {p: [] for p in subsets}
+    part_c_a1 = {p: 0 for p in subsets}
+    part_c_a2 = {p: 0 for p in subsets}
+    part_total = {p: 0 for p in subsets}
+
+    for t in range(T):
+        Y_t = gt_joints[t]
+        X_t = pred_joints[t]
+
+        if confidences is not None:
+            valid_mask = confidences[t] >= conf_thresh
+            if np.sum(valid_mask) < 3:
+                valid_mask = np.ones(J, dtype=bool)
+        else:
+            valid_mask = np.ones(J, dtype=bool)
+
+        # 1. Person-level reference scale for PCK thresholding
+        scale = None
+        if bboxes is not None and t < len(bboxes) and bboxes[t] is not None:
+            bbox = bboxes[t]
+            if len(bbox) >= 4:
+                scale = max(abs(bbox[2] - bbox[0]), abs(bbox[3] - bbox[1]))
+        if scale is None or scale <= 1e-4:
+            Y_val = Y_t[valid_mask]
+            scale = float(np.max(np.ptp(Y_val, axis=0))) if len(Y_val) > 1 else 100.0
+        if scale <= 1e-4:
+            scale = 100.0
+
+        thresh_1 = alpha_1 * scale
+        thresh_2 = alpha_2 * scale
+
+        # 2. Global Procrustes alignment (aligns entire skeleton based on valid joints)
+        s, R, t_vec = get_procrustes_alignment(Y_t[valid_mask], X_t[valid_mask])
+        X_aligned_t = apply_procrustes(X_t, s, R, t_vec)
+
+        # 3. Evaluate errors across subsets
+        for part, indices in subsets.items():
+            part_mask = np.zeros(J, dtype=bool)
+            part_mask[indices] = True
+            eval_mask = part_mask & valid_mask
+
+            if not np.any(eval_mask):
+                continue
+
+            y_sub = Y_t[eval_mask]
+            x_sub = X_aligned_t[eval_mask]
+
+            diff = np.linalg.norm(x_sub - y_sub, axis=-1)
+            part_errors[part].extend(diff.tolist())
+            part_c_a1[part] += int(np.sum(diff <= thresh_1))
+            part_c_a2[part] += int(np.sum(diff <= thresh_2))
+            part_total[part] += len(diff)
+
+    results = {}
+    for part in subsets:
+        errs = part_errors[part]
+        tot = part_total[part]
+        results[part] = {
+            "PA-MPJPE": round(float(np.mean(errs)), 3) if errs else 0.0,
+            f"PA-PCK@{alpha_1:.2f}": round(float(part_c_a1[part] / tot * 100.0), 2) if tot > 0 else 0.0,
+            f"PA-PCK@{alpha_2:.2f}": round(float(part_c_a2[part] / tot * 100.0), 2) if tot > 0 else 0.0
+        }
+
+    return results
+
+
 def compute_kinematic_metrics(gt_joints, pred_joints, confidences=None, bboxes=None,
-                              alpha_1=0.05, alpha_2=0.10, conf_thresh=0.3, joint_indices=None):
+                              alpha_1=0.05, alpha_2=0.10, conf_thresh=0.3, joint_indices=None,
+                              global_scale=None):
+    """
+    Backward-compatible function evaluating a single subset of joints.
+    """
     T, J, _ = gt_joints.shape
     if joint_indices is None:
         joint_indices = list(range(J))
@@ -401,8 +556,8 @@ def compute_kinematic_metrics(gt_joints, pred_joints, confidences=None, bboxes=N
         if len(Y_m) < 3:
             continue
 
-        scale = None
-        if bboxes is not None and t < len(bboxes) and bboxes[t] is not None:
+        scale = global_scale
+        if scale is None and bboxes is not None and t < len(bboxes) and bboxes[t] is not None:
             bbox = bboxes[t]
             if len(bbox) >= 4:
                 scale = max(abs(bbox[2] - bbox[0]), abs(bbox[3] - bbox[1]))
@@ -434,8 +589,9 @@ def evaluate_pair(source_path, generated_path,
                   resnet_extractor=None, vitpose_detector=None,
                   source_pose_path=None, generated_pose_path=None,
                   alpha_1=0.05, alpha_2=0.10, max_frames=None, device="cuda"):
-    src_t = load_video_frames(source_path, max_frames=max_frames)
-    gen_t = load_video_frames(generated_path, max_frames=max_frames)
+    eff_max_frames = int(max_frames) if (max_frames is not None and max_frames > 0) else None
+    src_t = load_video_frames(source_path, max_frames=eff_max_frames)
+    gen_t = load_video_frames(generated_path, max_frames=eff_max_frames)
 
     min_f = min(len(src_t), len(gen_t))
     src_t = src_t[:min_f]
@@ -467,25 +623,11 @@ def evaluate_pair(source_path, generated_path,
         T = min(min_f, len(gt_kps), len(pr_kps))
         gt_kps = gt_kps[:T]
         pr_kps = pr_kps[:T]
-        num_j = gt_kps.shape[1]
+        gt_c = gt_c[:T] if gt_c is not None else None
 
-        subsets = {
-            "Overall": list(range(num_j)),
-            "Pose": [i for i in BODY_INDICES if i < num_j],
-            "Face": [i for i in FACE_INDICES if i < num_j],
-            "Hands": [i for i in HAND_ALL_INDICES if i < num_j]
-        }
-
-        kin_res = {}
-        for part, indices in subsets.items():
-            if len(indices) >= 3:
-                res = compute_kinematic_metrics(gt_kps, pr_kps, gt_c, None, alpha_1, alpha_2, joint_indices=indices)
-                kin_res[part] = {
-                    "PA-MPJPE": round(res["PA_MPJPE"], 3),
-                    f"PA-PCK@{alpha_1:.2f}": round(res[f"PA_PCK@{alpha_1:.2f}"], 2),
-                    f"PA-PCK@{alpha_2:.2f}": round(res[f"PA_PCK@{alpha_2:.2f}"], 2)
-                }
-        result["kinematics_vitpose"] = kin_res
+        result["kinematics_vitpose"] = compute_wholebody_kinematics(
+            gt_kps, pr_kps, confidences=gt_c, alpha_1=alpha_1, alpha_2=alpha_2
+        )
     else:
         result["kinematics_vitpose"] = "ViTPose model / pose files not loaded (Place vitpose-l-wholebody.onnx in models/ or pass --vitpose_model)"
 
@@ -505,24 +647,83 @@ def main():
     parser.add_argument("--resnet_model", type=str, default=None, help="Path to r3d_18.pth (default: models/r3d_18.pth)")
     parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="Inference device (default: cuda)")
     parser.add_argument("--alpha_1", type=float, default=0.05, help="Strict PCK threshold (default: 0.05)")
-    parser.add_argument("--alpha_2", type=float, default=0.10, help="Standard PCK threshold (default: 0.10)")
+    parser.add_argument("--job_json", type=str, default=None, help="Path to existing job JSON file (e.g. outputs/jobs/job_xxx.json) to re-evaluate directly")
+    parser.add_argument("--update_job", action="store_true", help="Update the job JSON file in-place with new evaluation results")
     parser.add_argument("--max_frames", "-m", type=int, default=None, help="Max frames to evaluate")
     parser.add_argument("--output", "-o", type=str, default="evaluation_results.json", help="Output JSON path")
     args = parser.parse_args()
+    if args.max_frames is not None and args.max_frames <= 0:
+        args.max_frames = None
 
     pairs = []
-    if args.source and args.generated:
+    job_data = None
+    if args.job_json:
+        if not os.path.exists(args.job_json):
+            print(f"Error: Job file not found: {args.job_json}")
+            return
+        with open(args.job_json, "r", encoding="utf-8") as f:
+            job_data = json.load(f)
+
+        job_dir = os.path.dirname(os.path.abspath(args.job_json))
+        job_base = os.path.splitext(os.path.basename(args.job_json))[0]
+        possible_subdirs = [
+            os.path.join(job_dir, job_base),
+            job_dir
+        ]
+
+        for item in job_data.get("results", []):
+            v_name = item.get("video", "")
+            base = os.path.splitext(v_name)[0]
+            sp = item.get("source_path")
+            gp = item.get("generated_path")
+
+            # Check / resolve source path
+            if not sp or not os.path.exists(sp):
+                candidates = [
+                    os.path.join("data", "kaggle_vsl", "videos", v_name),
+                    os.path.join("data", "videos", v_name),
+                    os.path.join("data", v_name),
+                ]
+                for c in candidates:
+                    if os.path.exists(c):
+                        sp = c
+                        break
+
+            # Check / resolve generated path
+            if not gp or not os.path.exists(gp):
+                for sd in possible_subdirs:
+                    cand_gp = os.path.join(sd, f"{base}_gen.mp4")
+                    if os.path.exists(cand_gp):
+                        gp = cand_gp
+                        break
+                    cand_gp2 = os.path.join(sd, v_name)
+                    if os.path.exists(cand_gp2):
+                        gp = cand_gp2
+                        break
+
+            if sp and gp and os.path.exists(sp) and os.path.exists(gp):
+                pairs.append((sp, gp))
+            else:
+                print(f"Warning: Skipping {v_name} (source or generated file not found)")
+
+    elif args.source and args.generated:
         pairs.append((args.source, args.generated))
     elif args.source_dir and args.generated_dir:
         gen_files = glob.glob(os.path.join(args.generated_dir, "*.mp4"))
         for gf in gen_files:
             base = os.path.splitext(os.path.basename(gf))[0]
-            sf = os.path.join(args.source_dir, base + ".mp4")
-            if os.path.exists(sf):
-                pairs.append((sf, gf))
+            clean_base = base[:-4] if base.endswith("_gen") else base
+            cand_sources = [
+                os.path.join(args.source_dir, clean_base + ".mp4"),
+                os.path.join(args.source_dir, base + ".mp4"),
+            ]
+            for sf in cand_sources:
+                if os.path.exists(sf):
+                    pairs.append((sf, gf))
+                    break
 
     if not pairs:
-        print("Error: Please provide --source and --generated, or --source_dir and --generated_dir")
+        print("Error: Please provide --job_json, or --source and --generated, or --source_dir and --generated_dir")
         return
 
     detector = ViTPoseWholeBodyDetector(
@@ -564,6 +765,19 @@ def main():
             print("  ViTPose WholeBody Kinematics (PA-MPJPE / PA-PCK):")
             for part, vals in res["kinematics_vitpose"].items():
                 print(f"    [{part:<8}] PA-MPJPE: {vals['PA-MPJPE']:.3f} px | PA-PCK@{args.alpha_1:.2f}: {vals[f'PA-PCK@{args.alpha_1:.2f}']}% | PA-PCK@{args.alpha_2:.2f}: {vals[f'PA-PCK@{args.alpha_2:.2f}']}%")
+
+    if job_data is not None and args.update_job:
+        res_map = {os.path.basename(r["source"]): r for r in results}
+        for item in job_data.get("results", []):
+            v = item.get("video")
+            if v in res_map:
+                r = res_map[v]
+                item["frames"] = r.get("frames")
+                item["FVD"] = r.get("FVD")
+                item["kinematics"] = r.get("kinematics_vitpose")
+        with open(args.job_json, "w", encoding="utf-8") as f:
+            json.dump(job_data, f, indent=2, ensure_ascii=False)
+        print(f"\n[Done] Updated job file in-place: {args.job_json}")
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
