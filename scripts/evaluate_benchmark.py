@@ -647,6 +647,7 @@ def main():
     parser.add_argument("--resnet_model", type=str, default=None, help="Path to r3d_18.pth (default: models/r3d_18.pth)")
     parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="Inference device (default: cuda)")
     parser.add_argument("--alpha_1", type=float, default=0.05, help="Strict PCK threshold (default: 0.05)")
+    parser.add_argument("--alpha_2", type=float, default=0.10, help="Standard PCK threshold (default: 0.10)")
     parser.add_argument("--job_json", type=str, default=None, help="Path to existing job JSON file (e.g. outputs/jobs/job_xxx.json) to re-evaluate directly")
     parser.add_argument("--update_job", action="store_true", help="Update the job JSON file in-place with new evaluation results")
     parser.add_argument("--max_frames", "-m", type=int, default=None, help="Max frames to evaluate")
