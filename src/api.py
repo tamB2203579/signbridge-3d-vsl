@@ -467,7 +467,7 @@ class JobManager:
         # Kinematics aggregation if available
         kin_results = [r.get("kinematics") for r in results if isinstance(r.get("kinematics"), dict)]
         if kin_results:
-            parts = ["Overall", "Hands", "Pose", "Face"]
+            parts = ["Overall", "Hands", "Hands_Shape", "Pose", "Face"]
             for part in parts:
                 mpjpe_vals = []
                 pck_05_vals = []
@@ -818,6 +818,7 @@ def create_app(job_manager: Optional[JobManager] = None) -> Flask:
             return jsonify({"status": "error", "error": "n must be an integer"}), 400
 
         seed = int(data.get("seed", 42))
+        avatar = str(data.get("avatar") or "avatar_nam.png")
         max_frames_raw = data.get("max_frames")
         max_frames = None
         if max_frames_raw is not None:
@@ -861,6 +862,7 @@ def create_app(job_manager: Optional[JobManager] = None) -> Flask:
             return jsonify({"status": "error", "error": "video_name is required"}), 400
 
         seed = int(data.get("seed", 42))
+        avatar = str(data.get("avatar") or "avatar_nu.png")
         max_frames_raw = data.get("max_frames")
         max_frames = None
         if max_frames_raw is not None:

@@ -445,24 +445,92 @@ def align_procrustes(Y, X):
     return apply_procrustes(X, s, R, t_vec)
 
 
-def compute_wholebody_kinematics(gt_joints, pred_joints, confidences=None, bboxes=None,
-                                 alpha_1=0.05, alpha_2=0.10, conf_thresh=0.3):
+def is_hand_in_frame(hand_joints, hand_confs=None, conf_thresh=0.35, max_y=None, min_valid=4):
     """
-    Computes PA-MPJPE, PA-PCK@alpha_1, PA-PCK@alpha_2 across subsets (Overall, Pose, Face, Hands)
-    using frame-level global Procrustes alignment and consistent person-level scale normalization.
+    Determines whether a hand (21 keypoints) is legitimately visible in the video frame
+    or represents resting/out-of-frame noise.
+
+    1. Confidence check: Requires at least `min_valid` keypoints with confidence >= conf_thresh.
+    2. Boundary check: If max_y is provided, mean y of valid joints must be <= max_y (e.g. 0.95 * H).
+       When hands drop to the lap or below the camera frame, ViTPose coordinates cluster at the bottom border.
+    """
+    if hand_joints is None or len(hand_joints) == 0:
+        return False
+
+    if hand_confs is not None:
+        valid_mask = hand_confs >= conf_thresh
+        if np.sum(valid_mask) < min_valid:
+            return False
+        valid_joints = hand_joints[valid_mask]
+    else:
+        valid_joints = hand_joints
+
+    if max_y is not None and len(valid_joints) > 0:
+        mean_y = float(np.mean(valid_joints[:, 1]))
+        if mean_y > max_y:
+            return False
+
+    return True
+
+
+def match_hands_optimal(Y_L, Y_R, X_L, X_R, val_L, val_R, in_frame_L, in_frame_R):
+    """
+    Hungarian / Swap-Invariant bipartite matching between Ground Truth and Predicted hands.
+    Resolves left-right hand swapping caused by crossed-arm sign gestures or ViTPose identity flips.
+    """
+    cnt_L = int(np.sum(val_L)) if in_frame_L else 0
+    cnt_R = int(np.sum(val_R)) if in_frame_R else 0
+
+    if cnt_L >= 3 and cnt_R >= 3:
+        # Both hands active in GT: compare natural vs swapped assignment cost
+        d_nat = np.sum(np.linalg.norm(X_L[val_L] - Y_L[val_L], axis=-1)) + np.sum(np.linalg.norm(X_R[val_R] - Y_R[val_R], axis=-1))
+        d_swp = np.sum(np.linalg.norm(X_R[val_L] - Y_L[val_L], axis=-1)) + np.sum(np.linalg.norm(X_L[val_R] - Y_R[val_R], axis=-1))
+        if d_swp < d_nat:
+            return X_R, X_L, True
+        return X_L, X_R, False
+
+    elif cnt_L >= 3 and cnt_R < 3:
+        # Only left hand active in GT: assign whichever predicted hand is closer
+        d_nat = np.mean(np.linalg.norm(X_L[val_L] - Y_L[val_L], axis=-1))
+        d_swp = np.mean(np.linalg.norm(X_R[val_L] - Y_L[val_L], axis=-1))
+        if d_swp < d_nat:
+            return X_R, X_L, True
+        return X_L, X_R, False
+
+    elif cnt_R >= 3 and cnt_L < 3:
+        # Only right hand active in GT: assign whichever predicted hand is closer
+        d_nat = np.mean(np.linalg.norm(X_R[val_R] - Y_R[val_R], axis=-1))
+        d_swp = np.mean(np.linalg.norm(X_L[val_R] - Y_R[val_R], axis=-1))
+        if d_swp < d_nat:
+            return X_R, X_L, True
+        return X_L, X_R, False
+
+    return X_L, X_R, False
+
+
+def compute_wholebody_kinematics(gt_joints, pred_joints, confidences=None, bboxes=None,
+                                 alpha_1=0.05, alpha_2=0.10, conf_thresh=0.3, img_size=None):
+    """
+    Computes PA-MPJPE, PA-PCK@alpha_1, PA-PCK@alpha_2 across subsets (Overall, Pose, Face, Hands, Hands_Shape):
+    - Overall: Combined upper-body kinematics (Pose + Face + Active in-frame Hands)
+    - Pose: 17 Body keypoints
+    - Face: 68 Face landmark keypoints
+    - Hands: 42 Hand keypoints (Left & Right) with Hungarian swap-invariant matching and out-of-frame filtering
+    - Hands_Shape: Local Procrustes alignment per hand isolating finger articulation/shape from wrist translation
     """
     T, J, _ = gt_joints.shape
-    subsets = {
-        "Overall": list(range(J)),
-        "Pose": [i for i in BODY_INDICES if i < J],
-        "Face": [i for i in FACE_INDICES if i < J],
-        "Hands": [i for i in HAND_ALL_INDICES if i < J]
-    }
+    subsets = ["Overall", "Pose", "Face", "Hands", "Hands_Shape"]
 
     part_errors = {p: [] for p in subsets}
     part_c_a1 = {p: 0 for p in subsets}
     part_c_a2 = {p: 0 for p in subsets}
     part_total = {p: 0 for p in subsets}
+
+    # Bottom boundary threshold for out-of-frame hand filtering (95% of frame height)
+    if img_size is not None and len(img_size) >= 2:
+        max_y = 0.95 * float(img_size[0])
+    else:
+        max_y = 0.95 * float(np.max(gt_joints[:, :, 1])) if gt_joints.size > 0 else 465.0
 
     for t in range(T):
         Y_t = gt_joints[t]
@@ -490,14 +558,21 @@ def compute_wholebody_kinematics(gt_joints, pred_joints, confidences=None, bboxe
         thresh_1 = alpha_1 * scale
         thresh_2 = alpha_2 * scale
 
-        # 2. Global Procrustes alignment (aligns entire skeleton based on valid joints)
-        s, R, t_vec = get_procrustes_alignment(Y_t[valid_mask], X_t[valid_mask])
+        # 2. Global Procrustes alignment (aligns torso, head and camera perspective based on non-hand joints)
+        # Using torso/head reference prevents hand gestures or hand swaps from skewing the whole body frame.
+        ref_mask = np.ones(J, dtype=bool)
+        ref_mask[HAND_ALL_INDICES] = False
+        align_mask = ref_mask & valid_mask
+        if np.sum(align_mask) < 3:
+            align_mask = valid_mask
+
+        s, R, t_vec = get_procrustes_alignment(Y_t[align_mask], X_t[align_mask])
         X_aligned_t = apply_procrustes(X_t, s, R, t_vec)
 
-        # 3. Evaluate errors across subsets
-        for part, indices in subsets.items():
+        # 3. Evaluate Pose and Face
+        for part, indices in [("Pose", BODY_INDICES), ("Face", FACE_INDICES)]:
             part_mask = np.zeros(J, dtype=bool)
-            part_mask[indices] = True
+            part_mask[[i for i in indices if i < J]] = True
             eval_mask = part_mask & valid_mask
 
             if not np.any(eval_mask):
@@ -511,6 +586,54 @@ def compute_wholebody_kinematics(gt_joints, pred_joints, confidences=None, bboxe
             part_c_a1[part] += int(np.sum(diff <= thresh_1))
             part_c_a2[part] += int(np.sum(diff <= thresh_2))
             part_total[part] += len(diff)
+
+            # Add to Overall
+            part_errors["Overall"].extend(diff.tolist())
+            part_c_a1["Overall"] += int(np.sum(diff <= thresh_1))
+            part_c_a2["Overall"] += int(np.sum(diff <= thresh_2))
+            part_total["Overall"] += len(diff)
+
+        # 4. Hands evaluation with Hungarian Swap Matching & Out-of-Frame Filtering
+        Y_L = Y_t[HAND_LEFT_INDICES]
+        Y_R = Y_t[HAND_RIGHT_INDICES]
+        X_L = X_aligned_t[HAND_LEFT_INDICES]
+        X_R = X_aligned_t[HAND_RIGHT_INDICES]
+
+        c_L = confidences[t, HAND_LEFT_INDICES] if confidences is not None else np.ones(len(HAND_LEFT_INDICES), dtype=np.float32)
+        c_R = confidences[t, HAND_RIGHT_INDICES] if confidences is not None else np.ones(len(HAND_RIGHT_INDICES), dtype=np.float32)
+
+        in_f_L = is_hand_in_frame(Y_L, c_L, conf_thresh=conf_thresh, max_y=max_y)
+        in_f_R = is_hand_in_frame(Y_R, c_R, conf_thresh=conf_thresh, max_y=max_y)
+
+        val_L = c_L >= conf_thresh
+        val_R = c_R >= conf_thresh
+
+        m_X_L, m_X_R, _ = match_hands_optimal(Y_L, Y_R, X_L, X_R, val_L, val_R, in_f_L, in_f_R)
+
+        for is_in, y_h, x_h, val_h in [(in_f_L, Y_L, m_X_L, val_L), (in_f_R, Y_R, m_X_R, val_R)]:
+            if is_in and np.sum(val_h) >= 3:
+                # 4A. Global Hands Error (under whole-body alignment, swap-corrected)
+                diff_h = np.linalg.norm(x_h[val_h] - y_h[val_h], axis=-1)
+                part_errors["Hands"].extend(diff_h.tolist())
+                part_c_a1["Hands"] += int(np.sum(diff_h <= thresh_1))
+                part_c_a2["Hands"] += int(np.sum(diff_h <= thresh_2))
+                part_total["Hands"] += len(diff_h)
+
+                # Add valid in-frame hands to Overall
+                part_errors["Overall"].extend(diff_h.tolist())
+                part_c_a1["Overall"] += int(np.sum(diff_h <= thresh_1))
+                part_c_a2["Overall"] += int(np.sum(diff_h <= thresh_2))
+                part_total["Overall"] += len(diff_h)
+
+                # 4B. Local Hand Articulation Error (pure finger shape / configuration)
+                s_loc, R_loc, t_loc = get_procrustes_alignment(y_h[val_h], x_h[val_h])
+                x_local = apply_procrustes(x_h[val_h], s_loc, R_loc, t_loc)
+                diff_local = np.linalg.norm(x_local - y_h[val_h], axis=-1)
+
+                part_errors["Hands_Shape"].extend(diff_local.tolist())
+                part_c_a1["Hands_Shape"] += int(np.sum(diff_local <= thresh_1))
+                part_c_a2["Hands_Shape"] += int(np.sum(diff_local <= thresh_2))
+                part_total["Hands_Shape"] += len(diff_local)
 
     results = {}
     for part in subsets:
@@ -626,7 +749,8 @@ def evaluate_pair(source_path, generated_path,
         gt_c = gt_c[:T] if gt_c is not None else None
 
         result["kinematics_vitpose"] = compute_wholebody_kinematics(
-            gt_kps, pr_kps, confidences=gt_c, alpha_1=alpha_1, alpha_2=alpha_2
+            gt_kps, pr_kps, confidences=gt_c, alpha_1=alpha_1, alpha_2=alpha_2,
+            img_size=(src_t.shape[1], src_t.shape[2]) if (src_t is not None and len(src_t.shape) >= 3) else None
         )
     else:
         result["kinematics_vitpose"] = "ViTPose model / pose files not loaded (Place vitpose-l-wholebody.onnx in models/ or pass --vitpose_model)"
@@ -765,7 +889,32 @@ def main():
         if isinstance(res.get("kinematics_vitpose"), dict):
             print("  ViTPose WholeBody Kinematics (PA-MPJPE / PA-PCK):")
             for part, vals in res["kinematics_vitpose"].items():
-                print(f"    [{part:<8}] PA-MPJPE: {vals['PA-MPJPE']:.3f} px | PA-PCK@{args.alpha_1:.2f}: {vals[f'PA-PCK@{args.alpha_1:.2f}']}% | PA-PCK@{args.alpha_2:.2f}: {vals[f'PA-PCK@{args.alpha_2:.2f}']}%")
+                print(f"    [{part:<11}] PA-MPJPE: {vals['PA-MPJPE']:>7.3f} px | PA-PCK@{args.alpha_1:.2f}: {vals[f'PA-PCK@{args.alpha_1:.2f}']:>6.2f}% | PA-PCK@{args.alpha_2:.2f}: {vals[f'PA-PCK@{args.alpha_2:.2f}']:>6.2f}%")
+
+    # Print formatted benchmark summary table across all evaluated video pairs
+    if len(results) > 0:
+        print("\n" + "=" * 86)
+        print(f"BENCHMARK SUMMARY (N = {len(results)} videos)")
+        print("=" * 86)
+        fvd_list = [r["FVD"] for r in results if r.get("FVD") is not None]
+        if fvd_list:
+            print(f"{'FVD (3D ResNet-18)':<22}: Mean: {np.mean(fvd_list):>7.2f} ± {np.std(fvd_list):<6.2f} | Median: {np.median(fvd_list):>7.2f} | Min-Max: [{np.min(fvd_list):.2f}, {np.max(fvd_list):.2f}]")
+
+        kin_res_list = [r["kinematics_vitpose"] for r in results if isinstance(r.get("kinematics_vitpose"), dict)]
+        if kin_res_list:
+            print("-" * 86)
+            print(f"{'Subset':<14} | {'PA-MPJPE (px)':<30} | {'PA-PCK@' + f'{args.alpha_1:.2f} (%)':<16} | {'PA-PCK@' + f'{args.alpha_2:.2f} (%)':<16}")
+            print("-" * 86)
+            for part in ["Overall", "Hands", "Hands_Shape", "Pose", "Face"]:
+                m_list = [k[part]["PA-MPJPE"] for k in kin_res_list if part in k and "PA-MPJPE" in k[part]]
+                p1_list = [k[part][f"PA-PCK@{args.alpha_1:.2f}"] for k in kin_res_list if part in k and f"PA-PCK@{args.alpha_1:.2f}" in k[part]]
+                p2_list = [k[part][f"PA-PCK@{args.alpha_2:.2f}"] for k in kin_res_list if part in k and f"PA-PCK@{args.alpha_2:.2f}" in k[part]]
+                if m_list:
+                    m_str = f"{np.mean(m_list):.2f} ± {np.std(m_list):.2f} (med {np.median(m_list):.2f})"
+                    p1_str = f"{np.mean(p1_list):.2f}%"
+                    p2_str = f"{np.mean(p2_list):.2f}%"
+                    print(f"{part:<14} | {m_str:<30} | {p1_str:<16} | {p2_str:<16}")
+        print("=" * 86)
 
     if job_data is not None and args.update_job:
         res_map = {os.path.basename(r["source"]): r for r in results}
@@ -776,9 +925,31 @@ def main():
                 item["frames"] = r.get("frames")
                 item["FVD"] = r.get("FVD")
                 item["kinematics"] = r.get("kinematics_vitpose")
+
+        # Recalculate summary in job_data
+        summary = {}
+        fvd_scores = [r.get("FVD") for r in results if r.get("FVD") is not None]
+        if fvd_scores:
+            summary["mean_FVD"] = round(float(np.mean(fvd_scores)), 2)
+
+        kin_results = [r.get("kinematics_vitpose") for r in results if isinstance(r.get("kinematics_vitpose"), dict)]
+        if kin_results:
+            parts = ["Overall", "Hands", "Hands_Shape", "Pose", "Face"]
+            for part in parts:
+                mpjpe_vals = [k[part]["PA-MPJPE"] for k in kin_results if part in k and "PA-MPJPE" in k[part]]
+                pck_a1_vals = [k[part][f"PA-PCK@{args.alpha_1:.2f}"] for k in kin_results if part in k and f"PA-PCK@{args.alpha_1:.2f}" in k[part]]
+                pck_a2_vals = [k[part][f"PA-PCK@{args.alpha_2:.2f}"] for k in kin_results if part in k and f"PA-PCK@{args.alpha_2:.2f}" in k[part]]
+                if mpjpe_vals:
+                    summary[f"mean_{part.lower()}_PA_MPJPE"] = round(float(np.mean(mpjpe_vals)), 3)
+                if pck_a1_vals:
+                    summary[f"mean_{part.lower()}_PA_PCK@{args.alpha_1:.2f}"] = round(float(np.mean(pck_a1_vals)), 2)
+                if pck_a2_vals:
+                    summary[f"mean_{part.lower()}_PA_PCK@{args.alpha_2:.2f}"] = round(float(np.mean(pck_a2_vals)), 2)
+        job_data["summary"] = summary
+
         with open(args.job_json, "w", encoding="utf-8") as f:
             json.dump(job_data, f, indent=2, ensure_ascii=False)
-        print(f"\n[Done] Updated job file in-place: {args.job_json}")
+        print(f"\n[Done] Updated job file and summary in-place: {args.job_json}")
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
