@@ -93,7 +93,7 @@
   },
   "264": {
     "inputs": {
-      "value": 720
+      "value": 480
     },
     "class_type": "easy int",
     "_meta": {
@@ -102,7 +102,7 @@
   },
   "265": {
     "inputs": {
-      "value": 1280
+      "value": 832
     },
     "class_type": "easy int",
     "_meta": {
@@ -111,7 +111,7 @@
   },
   "276": {
     "inputs": {
-      "value": 0
+      "value": 20
     },
     "class_type": "easy int",
     "_meta": {
@@ -125,25 +125,6 @@
     "class_type": "easy boolean",
     "_meta": {
       "title": "Boolean"
-    }
-  },
-  "303": {
-    "inputs": {
-      "fps": [
-        "319",
-        5
-      ],
-      "filename_prefix": "video/ComfyUI",
-      "only_preview": true,
-      "video-preview": "",
-      "images": [
-        "359",
-        3
-      ]
-    },
-    "class_type": "SaveVideoRGBA",
-    "_meta": {
-      "title": "Save Video (RGBA)"
     }
   },
   "316": {
@@ -629,8 +610,8 @@
       "upscale_method": "lanczos",
       "keep_proportion": "crop",
       "pad_color": "0, 0, 0",
-      "crop_position": "top",
-      "divisible_by": 16,
+      "crop_position": "center",
+      "divisible_by": 8,
       "device": "cpu",
       "image": [
         "167",
@@ -652,11 +633,11 @@
         "320",
         1
       ],
-      "upscale_method": "lanczos",
-      "keep_proportion": "crop",
+      "upscale_method": "nearest-exact",
+      "keep_proportion": "stretch",
       "pad_color": "0, 0, 0",
-      "crop_position": "top",
-      "divisible_by": 16,
+      "crop_position": "center",
+      "divisible_by": 2,
       "device": "cpu",
       "image": [
         "52",
@@ -679,8 +660,8 @@
         2
       ],
       "retarget_padding": 10,
-      "body_stick_width": 3,
-      "hand_stick_width": 3,
+      "body_stick_width": -1,
+      "hand_stick_width": -1,
       "draw_head": "True",
       "pose_data": [
         "316",
@@ -974,7 +955,7 @@
   },
   "370": {
     "inputs": {
-      "value": 4095
+      "value": 7
     },
     "class_type": "easy int",
     "_meta": {
