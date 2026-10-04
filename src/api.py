@@ -578,7 +578,7 @@ OPENAPI_SPEC = {
                             "schema": {
                                 "type": "object",
                                 "properties": {
-                                    "n": {"type": "integer", "default": 3, "description": "Number of videos to sample (1-100)"},
+                                    "n": {"type": "integer", "default": 3, "description": "Number of videos to sample (up to total dataset size)"},
                                     "seed": {"type": "integer", "default": 42, "description": "Sampling and generation seed"},
                                     "avatar": {"type": "string", "default": "avatar_nam.png", "description": "Reference avatar filename from Avatars/"},
                                     "max_frames": {"type": "integer", "nullable": True, "description": "Max frames to generate and evaluate (null for all)"},
@@ -817,10 +817,21 @@ def create_app(job_manager: Optional[JobManager] = None) -> Flask:
         data = request.get_json(silent=True) or {}
         try:
             n = int(data.get("n", 3))
-            if n <= 0 or n > 100:
-                return jsonify({"status": "error", "error": "n must be between 1 and 100"}), 400
+            if n <= 0:
+                return jsonify({"status": "error", "error": "n must be a positive integer greater than 0"}), 400
         except ValueError:
             return jsonify({"status": "error", "error": "n must be an integer"}), 400
+
+        try:
+            total_available = len(dataset_mgr.load_labels())
+        except Exception:
+            total_available = 0
+
+        if total_available > 0 and n > total_available:
+            return jsonify({
+                "status": "error",
+                "error": f"n cannot exceed total available dataset samples ({total_available})"
+            }), 400
 
         seed = int(data.get("seed", 42))
         avatar = str(data.get("avatar") or "avatar_nam.png")
